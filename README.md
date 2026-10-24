@@ -99,7 +99,7 @@ docs/              roadmap and learning notes
 - Database credentials should be passed through environment variables, not stored in code.
 
 ## Tech stack
-Python, pandas, SQLAlchemy, openpyxl, lxml, pytest, GitHub Actions.
+Python, pandas, SQLAlchemy, openpyxl, lxml, pytest
 
 ## Author
 Archana: [GitHub](https://github.com/Archana9991)
