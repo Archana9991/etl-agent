@@ -1,4 +1,4 @@
-"""Command line interface.
+"""Command line interface (a thin layer over the library).
 
 Examples:
   python -m etl_agent.cli files a.csv b.xlsx --keys ID
@@ -6,19 +6,16 @@ Examples:
   python -m etl_agent.cli infer-schema sample_data/source.csv --pk ID
   python -m etl_agent.cli generate sample_data/source.csv --pk ID
   python -m etl_agent.cli agent sample_data/source.csv --pk ID
-  python -m etl_agent.cli agent sample_data/source.csv --pk ID --ai-explain
 """
 import argparse
 import sys
-from pathlib import Path
 
-from .agent import (CommandRunner, DemoRunner, EtlUnavailable,
-                    make_verifier, run_suite, write_agent_report)
+from .agent import load_code_map
 from .comparator import compare_dataframes
-from .db_compare import compare_tables
+from .db_compare import (check_connection, compare_file_to_table,
+                         compare_tables)
 from .generators import generate_all
-from .llm_agent import (ClaudeClient, LLMUnavailable, explain_failures,
-                        generate_ai_scenarios, suggest_scenarios)
+from .orchestrator import AgentConfig, ETLAgent, resolve_db_url
 from .readers import read_file
 from .report import write_report
 from .schema import TableSchema, infer_schema
@@ -33,15 +30,36 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("target")
     f.add_argument("--keys", nargs="+", required=True)
     f.add_argument("--ignore", nargs="*", default=[])
+    f.add_argument("--normalize", action="store_true",
+                   help="treat 1.5 == 1.50 and a date == its midnight time")
     f.add_argument("--out", default="reports")
 
-    t = sub.add_parser("tables", help="compare a table across two databases")
-    t.add_argument("src_url")
-    t.add_argument("tgt_url")
-    t.add_argument("table")
+    t = sub.add_parser("tables", help="compare two database tables")
+    t.add_argument("src_url", help="database URL, or env:VARIABLE_NAME")
+    t.add_argument("tgt_url", help="database URL, or env:VARIABLE_NAME")
+    t.add_argument("table", help="source table, e.g. dbo.customers_src")
+    t.add_argument("--tgt-table", default=None,
+                   help="target table if its name differs from the source")
     t.add_argument("--keys", nargs="+", required=True)
     t.add_argument("--ignore", nargs="*", default=[])
+    t.add_argument("--normalize", action="store_true",
+                   help="treat 1.5 == 1.50 and a date == its midnight time")
     t.add_argument("--out", default="reports")
+
+    ft = sub.add_parser("file-table",
+                        help="compare a source file with a database table")
+    ft.add_argument("file", help="source file: csv, xlsx or xml")
+    ft.add_argument("url", help="database URL, or env:VARIABLE_NAME")
+    ft.add_argument("table", help="target table, e.g. dbo.customers")
+    ft.add_argument("--keys", nargs="+", required=True)
+    ft.add_argument("--ignore", nargs="*", default=[])
+    ft.add_argument("--exact-text", action="store_true",
+                    help="compare as exact text (no number/date tolerance)")
+    ft.add_argument("--out", default="reports")
+
+    d = sub.add_parser("db-check", help="test a database connection")
+    d.add_argument("url", help="database URL, or env:VARIABLE_NAME")
+    d.add_argument("--schema", default=None, help="e.g. dbo")
 
     i = sub.add_parser("infer-schema", help="infer a schema JSON from a file")
     i.add_argument("source")
@@ -62,8 +80,17 @@ def build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--etl-command", default=None,
                     help='e.g. "python my_etl.py {file}" (omit: demo ETL)')
     ag.add_argument("--db-url", default=None,
-                    help="target DB, used to verify loaded data")
+                    help="target DB URL, or env:VARIABLE_NAME")
     ag.add_argument("--table", default="TARGET")
+    ag.add_argument("--sample-rows", type=int, default=200,
+                    help="build test files from the first N rows (0 = all)")
+    ag.add_argument("--code-map", default=None,
+                    help="JSON file: your ETL's wording -> our error codes")
+    ag.add_argument("--reason-check", choices=["strict", "off"],
+                    default="strict",
+                    help="off: any rejection of a bad file counts as a pass")
+    ag.add_argument("--allow-sensitive", action="store_true",
+                    help="skip the sensitive-data guard (use with care)")
     ag.add_argument("--ai-scenarios", type=int, default=0, metavar="N",
                     help="ask Claude for up to N extra scenarios")
     ag.add_argument("--ai-explain", action="store_true",
@@ -73,10 +100,51 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def run_agent_command(a, llm=None) -> int:
+    try:
+        code_map = load_code_map(a.code_map) if a.code_map else {}
+    except (OSError, ValueError) as exc:
+        print(f"STOPPED: bad --code-map file: {exc}")
+        return 2
+    config = AgentConfig(
+        source=a.source,
+        out_dir=a.out,
+        schema_path=a.schema,
+        primary_key=a.pk,
+        etl_command=a.etl_command,
+        db_url=a.db_url,
+        table=a.table,
+        sample_rows=a.sample_rows or None,
+        ai_scenarios=a.ai_scenarios,
+        ai_explain=a.ai_explain,
+        demo_disable=a.demo_disable,
+        code_map=code_map,
+        strict_reason=(a.reason_check == "strict"),
+        allow_sensitive=a.allow_sensitive,
+    )
+    return ETLAgent(config, llm=llm).run().exit_code
+
+
+def run_db_check(a) -> int:
+    try:
+        dialect, names = check_connection(resolve_db_url(a.url), a.schema)
+    except Exception as exc:
+        print("FAILED: could not connect.")
+        print(f"Details: {str(exc)[:600]}")
+        return 2
+    print(f"Connected OK (database type: {dialect}).")
+    print(f"Tables found: {len(names)}")
+    for name in names[:50]:
+        print(f"  {name}")
+    return 0
+
+
 def main(argv=None, llm=None) -> int:
     a = build_parser().parse_args(argv)
     if a.cmd == "agent":
-        return run_agent(a, llm)
+        return run_agent_command(a, llm)
+    if a.cmd == "db-check":
+        return run_db_check(a)
     if a.cmd == "infer-schema":
         schema = infer_schema(read_file(a.source), a.pk)
         schema.save(a.out)
@@ -96,82 +164,30 @@ def main(argv=None, llm=None) -> int:
         return 0
     if a.cmd == "files":
         res = compare_dataframes(read_file(a.source), read_file(a.target),
-                                 a.keys, a.ignore)
+                                 a.keys, a.ignore, normalize=a.normalize)
+    elif a.cmd == "file-table":
+        try:
+            res = compare_file_to_table(
+                a.file, resolve_db_url(a.url), a.table, a.keys,
+                ignore_columns=a.ignore, normalize=not a.exact_text)
+        except Exception as exc:
+            print("STOPPED: could not compare the file and the table.")
+            print(f"Details: {str(exc)[:400]}")
+            return 2
     else:
-        res = compare_tables(a.src_url, a.tgt_url, a.table, a.keys,
-                             ignore_columns=a.ignore)
+        try:
+            res = compare_tables(
+                resolve_db_url(a.src_url), resolve_db_url(a.tgt_url),
+                a.table, a.keys, tgt_table=a.tgt_table,
+                ignore_columns=a.ignore, normalize=a.normalize)
+        except Exception as exc:
+            print("STOPPED: could not compare the tables.")
+            print(f"Details: {str(exc)[:400]}")
+            print("Tip: run the db-check command on each URL first.")
+            return 2
     print(res.summary())
     print(f"Report written to: {write_report(res, a.out)}")
     return 0 if res.passed else 1   # non-zero exit lets CI fail the build
-
-
-def run_agent(a, llm=None) -> int:
-    out = Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
-    if a.schema:
-        schema = TableSchema.load(a.schema)
-    else:
-        schema = infer_schema(read_file(a.source), a.pk)
-    schema.save(out / "schema_used.json")
-    manifest = generate_all(a.source, schema, str(out / "test_data"))
-
-    # Optional AI layer. If unavailable, the core agent carries on.
-    if (a.ai_scenarios or a.ai_explain) and llm is None:
-        try:
-            llm = ClaudeClient()
-        except LLMUnavailable as exc:
-            print(f"AI features skipped: {exc}")
-    if llm and a.ai_scenarios:
-        try:
-            existing = list(manifest["scenario"])
-            proposed, problems = suggest_scenarios(
-                schema, existing, llm, a.ai_scenarios)
-            if proposed:
-                generate_ai_scenarios(a.source, proposed,
-                                      str(out / "test_data"))
-            print(f"AI proposed {len(proposed)} extra scenarios "
-                  f"({len(problems)} rejected as invalid).")
-            for pr in problems:
-                print(f"  rejected: {pr}")
-        except LLMUnavailable as exc:
-            print(f"AI scenario step skipped: {exc}")
-
-    db_url = a.db_url
-    if not db_url and not a.etl_command:
-        db_url = f"sqlite:///{(out / 'target.db').as_posix()}"
-    if a.etl_command:
-        runner = CommandRunner(a.etl_command)
-    else:
-        runner = DemoRunner(schema, db_url, a.table, a.demo_disable)
-    verify = None
-    if db_url and schema.primary_key:
-        verify = make_verifier(db_url, a.table, schema.primary_key)
-
-    try:
-        results = run_suite(str(out / "test_data"), runner, verify)
-    except EtlUnavailable as exc:
-        print("STOPPED: ETL command could not be started.")
-        print("No files were tested.")
-        print(f"Details: {exc}")
-        print("Try running your ETL command by hand first.")
-        return 2
-    report = write_agent_report(results, str(out))
-    cols = ["scenario", "expected", "actual", "verdict"]
-    print(results[cols].to_string(index=False))
-    failed = results[results["verdict"] != "PASS"]
-    passed_n = len(results) - len(failed)
-    print(f"\n{passed_n} of {len(results)} passed. Report: {report}")
-    for r in failed.itertuples():
-        print(f"  FAILED {r.scenario}: {r.detail}")
-    if llm and a.ai_explain and not failed.empty:
-        try:
-            text = explain_failures(results, schema, llm)
-            (out / "ai_explanation.md").write_text(text, encoding="utf-8")
-            print("\n--- AI explanation ---")
-            print(text)
-        except LLMUnavailable as exc:
-            print(f"AI explanation skipped: {exc}")
-    return 0 if failed.empty else 1
 
 
 if __name__ == "__main__":

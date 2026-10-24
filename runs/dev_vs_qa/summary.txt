@@ -1,0 +1,8 @@
+Status            : FAIL
+Rows (src / tgt)  : 100000 / 99999
+Missing columns   : none
+Extra columns     : none
+Duplicate keys    : src=0 tgt=0
+Only in source    : 3 rows
+Only in target    : 2 rows
+Value mismatches  : 5 cells

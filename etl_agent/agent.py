@@ -1,4 +1,4 @@
-"""The ETL testing agent: run every generated file through an ETL and judge the reaction.
+"""The ETL testing agent's hands and judgement.
 
 Plug in ANY ETL by supplying a 'runner': a function that takes a file path
 and returns an EtlOutcome. Two runners are provided:
@@ -70,8 +70,11 @@ class CommandRunner:
     output (otherwise UNKNOWN_REJECTION).
     """
 
-    def __init__(self, template: str, timeout: int = 300):
+    def __init__(self, template: str, timeout: int = 300, code_map=None):
         self.template, self.timeout = template, timeout
+        # Your ETL's own wording -> our error codes, e.g.
+        # {"ORA-00001": "DUPLICATE_PRIMARY_KEY"}
+        self.code_map = dict(code_map or {})
 
     def __call__(self, file: str) -> EtlOutcome:
         posix = os.name != "nt"
@@ -88,15 +91,35 @@ class CommandRunner:
         text = proc.stdout + proc.stderr
         if proc.returncode == 0:
             return EtlOutcome("LOADED", message=text.strip()[:200])
-        code = next((c for c in KNOWN_CODES if c in text), None)
+        lowered = text.lower()
+        code = next((c for k, c in self.code_map.items()
+                     if k.lower() in lowered), None)
+        if code is None:
+            code = next((c for c in KNOWN_CODES if c in text), None)
         if code is None and any(m in text for m in LAUNCH_FAILURES):
             return EtlOutcome("ERROR", "CANNOT_RUN", text.strip()[:300])
         return EtlOutcome("REJECTED", code or "UNKNOWN_REJECTION",
                           text.strip()[:200])
 
 
-def judge(expected: str, o: EtlOutcome):
-    """Compare what the ETL did with what it should have done."""
+def load_code_map(path: str) -> dict:
+    """Read a JSON file like {"unique constraint": "DUPLICATE_PRIMARY_KEY"}."""
+    import json
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("code map must be a JSON object")
+    for text, code in data.items():
+        if code not in KNOWN_CODES:
+            raise ValueError(f"unknown code {code!r} for {text!r}")
+    return data
+
+
+def judge(expected: str, o: EtlOutcome, strict_reason: bool = True):
+    """Compare what the ETL did with what it should have done.
+
+    strict_reason=False: any rejection of a bad file counts as a pass
+    (use it when your ETL does not say WHY it rejected a file).
+    """
     if o.status == "ERROR":
         return "ERROR", f"{o.code}: {o.message}"
     if expected == "LOAD_SUCCESS":
@@ -107,6 +130,8 @@ def judge(expected: str, o: EtlOutcome):
     if o.status == "LOADED":
         return ("FAIL_BAD_DATA_ACCEPTED",
                 f"ETL loaded a file that should fail with {expected}")
+    if not strict_reason:
+        return "PASS", f"Rejected (reason not checked): {o.code}"
     if o.code == expected:
         return "PASS", f"Rejected with {o.code}"
     return "FAIL_WRONG_REASON", f"Expected {expected}, got {o.code}"
@@ -124,7 +149,8 @@ def make_verifier(db_url: str, table: str, keys: list):
     return verify
 
 
-def run_suite(test_dir: str, runner, verify=None) -> pd.DataFrame:
+def run_suite(test_dir: str, runner, verify=None,
+              strict_reason: bool = True) -> pd.DataFrame:
     manifest = pd.read_csv(Path(test_dir) / "manifest.csv",
                            dtype=str, keep_default_na=False)
     rows = []
@@ -135,7 +161,8 @@ def run_suite(test_dir: str, runner, verify=None) -> pd.DataFrame:
         if outcome.status == "ERROR" and outcome.code == "CANNOT_RUN":
             # No point judging every file if the ETL never ran.
             raise EtlUnavailable(outcome.message)
-        verdict, detail = judge(m["expected_failure"], outcome)
+        verdict, detail = judge(m["expected_failure"], outcome,
+                                strict_reason)
         is_baseline = m["expected_failure"] == "LOAD_SUCCESS"
         if verdict == "PASS" and is_baseline and verify:
             ok, msg = verify(file_path)

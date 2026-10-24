@@ -1,0 +1,55 @@
+{
+  "primary_key": [
+    "id"
+  ],
+  "columns": [
+    {
+      "name": "id",
+      "dtype": "integer",
+      "nullable": false,
+      "max_length": null
+    },
+    {
+      "name": "first_name",
+      "dtype": "string",
+      "nullable": false,
+      "max_length": null
+    },
+    {
+      "name": "last_name",
+      "dtype": "string",
+      "nullable": false,
+      "max_length": null
+    },
+    {
+      "name": "email",
+      "dtype": "string",
+      "nullable": false,
+      "max_length": null
+    },
+    {
+      "name": "age",
+      "dtype": "integer",
+      "nullable": false,
+      "max_length": null
+    },
+    {
+      "name": "city",
+      "dtype": "string",
+      "nullable": false,
+      "max_length": null
+    },
+    {
+      "name": "salary",
+      "dtype": "decimal",
+      "nullable": false,
+      "max_length": null
+    },
+    {
+      "name": "joined",
+      "dtype": "date",
+      "nullable": false,
+      "max_length": null
+    }
+  ]
+}
