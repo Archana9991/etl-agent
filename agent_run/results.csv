@@ -1,0 +1,13 @@
+scenario,file,expected,actual,verdict,detail,seconds
+valid_baseline,source__valid_baseline.csv,LOAD_SUCCESS,LOADED,PASS,Valid file loaded,0.089
+invalid_header,source__invalid_header.csv,HEADER_MISMATCH,REJECTED HEADER_MISMATCH,PASS,Rejected with HEADER_MISMATCH,0.003
+blank_file,source__blank_file.csv,EMPTY_FILE,REJECTED EMPTY_FILE,PASS,Rejected with EMPTY_FILE,0.0
+header_only,source__header_only.csv,NO_DATA_ROWS,REJECTED NO_DATA_ROWS,PASS,Rejected with NO_DATA_ROWS,0.002
+invalid_file_name,bad name@#!.csv,INVALID_FILE_NAME,REJECTED INVALID_FILE_NAME,PASS,Rejected with INVALID_FILE_NAME,0.0
+duplicate_pk,source__duplicate_pk.csv,DUPLICATE_PRIMARY_KEY,REJECTED DUPLICATE_PRIMARY_KEY,PASS,Rejected with DUPLICATE_PRIMARY_KEY,0.004
+null_ID,source__null_ID.csv,NULL_IN_NOT_NULL_COLUMN,REJECTED NULL_IN_NOT_NULL_COLUMN,PASS,Rejected with NULL_IN_NOT_NULL_COLUMN,0.003
+null_NAME,source__null_NAME.csv,NULL_IN_NOT_NULL_COLUMN,REJECTED NULL_IN_NOT_NULL_COLUMN,PASS,Rejected with NULL_IN_NOT_NULL_COLUMN,0.003
+null_CITY,source__null_CITY.csv,NULL_IN_NOT_NULL_COLUMN,REJECTED NULL_IN_NOT_NULL_COLUMN,PASS,Rejected with NULL_IN_NOT_NULL_COLUMN,0.004
+missing_column,source__missing_column.csv,COLUMN_COUNT_MISMATCH,REJECTED COLUMN_COUNT_MISMATCH,PASS,Rejected with COLUMN_COUNT_MISMATCH,0.003
+extra_column,source__extra_column.csv,COLUMN_COUNT_MISMATCH,REJECTED COLUMN_COUNT_MISMATCH,PASS,Rejected with COLUMN_COUNT_MISMATCH,0.002
+bad_type_ID,source__bad_type_ID.csv,INVALID_DATA_TYPE,REJECTED INVALID_DATA_TYPE,PASS,Rejected with INVALID_DATA_TYPE,0.005
