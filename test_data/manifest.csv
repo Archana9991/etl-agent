@@ -1,0 +1,13 @@
+scenario,file,expected_failure,description
+valid_baseline,source__valid_baseline.csv,LOAD_SUCCESS,Untouched copy of the input; must load cleanly
+invalid_header,source__invalid_header.csv,HEADER_MISMATCH,Column 'ID' renamed to 'ID_X'
+blank_file,source__blank_file.csv,EMPTY_FILE,File with no header and no data
+header_only,source__header_only.csv,NO_DATA_ROWS,Header present but zero data rows
+invalid_file_name,bad name@#!.csv,INVALID_FILE_NAME,File name has spaces and special characters
+duplicate_pk,source__duplicate_pk.csv,DUPLICATE_PRIMARY_KEY,First row repeated; key ['ID'] now appears twice
+null_ID,source__null_ID.csv,NULL_IN_NOT_NULL_COLUMN,Row 1 has blank value in NOT NULL column 'ID'
+null_NAME,source__null_NAME.csv,NULL_IN_NOT_NULL_COLUMN,Row 1 has blank value in NOT NULL column 'NAME'
+null_CITY,source__null_CITY.csv,NULL_IN_NOT_NULL_COLUMN,Row 1 has blank value in NOT NULL column 'CITY'
+missing_column,source__missing_column.csv,COLUMN_COUNT_MISMATCH,Column 'CITY' removed
+extra_column,source__extra_column.csv,COLUMN_COUNT_MISMATCH,Unexpected column UNEXPECTED_COL added
+bad_type_ID,source__bad_type_ID.csv,INVALID_DATA_TYPE,'ABC' placed in integer column 'ID'
