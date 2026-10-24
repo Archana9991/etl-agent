@@ -1,0 +1,25 @@
+{
+  "primary_key": [
+    "ID"
+  ],
+  "columns": [
+    {
+      "name": "ID",
+      "dtype": "integer",
+      "nullable": false,
+      "max_length": null
+    },
+    {
+      "name": "NAME",
+      "dtype": "string",
+      "nullable": false,
+      "max_length": null
+    },
+    {
+      "name": "CITY",
+      "dtype": "string",
+      "nullable": false,
+      "max_length": null
+    }
+  ]
+}
