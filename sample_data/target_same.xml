@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='utf-8'?>
+<data>
+  <record>
+    <ID>1</ID>
+    <NAME>Asha</NAME>
+    <CITY>Pune</CITY>
+  </record>
+  <record>
+    <ID>2</ID>
+    <NAME>Ravi</NAME>
+    <CITY>Delhi</CITY>
+  </record>
+  <record>
+    <ID>3</ID>
+    <NAME>Meera</NAME>
+    <CITY>Chennai</CITY>
+  </record>
+</data>
