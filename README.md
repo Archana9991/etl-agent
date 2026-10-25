@@ -91,6 +91,9 @@ tests/             pytest suite
 sample_data/       small example files
 docs/              roadmap and learning notes
 ```
+## UI
+<img width="1901" height="951" alt="image" src="https://github.com/user-attachments/assets/84d2b049-470a-4fbd-838f-e683dd744a7c" />
+
 
 ## Design notes
 - All formats are normalised to the same DataFrame shape, so the comparison logic doesn't depend on the source format.
