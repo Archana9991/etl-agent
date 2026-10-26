@@ -3,3 +3,4 @@ openpyxl>=3.1
 lxml>=5.0
 sqlalchemy>=2.0
 pytest>=8.0
+streamlit>=1.40
