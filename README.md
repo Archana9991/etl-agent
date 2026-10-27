@@ -87,6 +87,12 @@ src/etl_agent/
   schema.py        schema inference, JSON save/load
   generators.py    negative test file generation
   cli.py           command line interface
+  mapping.py         mapping file: load, validate, transformation whitelist
+  sqlgen.py          SQL generator: select, DDL, checks, dialects
+  target_builder.py  expected target in pandas, create and load the table
+  etl_checks.py      data-quality and transformation checks, report
+  automation.py      Phase 4 workflows used by the CLI and the UI
+app.py               Streamlit web UI (project root)
 tests/             pytest suite
 sample_data/       small example files
 docs/              roadmap and learning notes
@@ -103,6 +109,42 @@ docs/              roadmap and learning notes
 
 ## Tech stack
 Python, pandas, SQLAlchemy, openpyxl, lxml, pytest
+
+
+## Phase 4: ETL automation (mapping-driven)
+
+Everything starts from a **mapping file** (CSV, Excel or JSON): one row per target column saying which source column(s) feed it and which rule applies. See `sample_data/customer_mapping.csv`.
+
+| Rule | What it does |
+|------|--------------|
+| DIRECT / TRIM / UPPER / LOWER | copy, trim, change case |
+| CONSTANT | fill with a fixed value (`PARAMETER`) |
+| DEFAULT | use `PARAMETER` when the source is blank or NULL |
+| CONCAT | join source columns (`PARAMETER` = separator) |
+| SUBSTRING | `PARAMETER` = `start:length` (start from 1) |
+| LOOKUP | `PARAMETER` = `M=Male;F=Female` |
+
+```bash
+# 1. SQL query generator
+python -m etl_agent.cli mapping-sql sample_data/customer_mapping.csv \
+    --source-table CUSTOMERS_RAW --target-table DIM_CUSTOMER --dialect oracle --out sql_out
+
+# 2. Build the target (expected data file, and optionally a real table)
+python -m etl_agent.cli build-target sample_data/customer_mapping.csv \
+    --source sample_data/customers_raw.csv --source-table CUSTOMERS_RAW \
+    --target-table DIM_CUSTOMER --db-url sqlite:///target.db
+
+# 3. ETL checks
+python -m etl_agent.cli etl-check sample_data/customer_mapping.csv \
+    --source sample_data/customers_raw.csv --source-table CUSTOMERS_RAW \
+    --target-table DIM_CUSTOMER --target-url sqlite:///target.db --run-sql
+
+# 4. The same three workflows in a web UI
+pip install -r requirements-ui.txt
+streamlit run app.py
+```
+
+Dialects: `ansi`, `sqlite`, `postgres`, `oracle`, `mssql`. Exit codes: `0` all ok, `1` a check failed, `2` setup problem, `3` sensitive data suspected.
 
 ## Author
 Archana: [GitHub](https://github.com/Archana9991)

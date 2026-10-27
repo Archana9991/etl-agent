@@ -6,15 +6,22 @@ Examples:
   python -m etl_agent.cli infer-schema sample_data/source.csv --pk ID
   python -m etl_agent.cli generate sample_data/source.csv --pk ID
   python -m etl_agent.cli agent sample_data/source.csv --pk ID
+  python -m etl_agent.cli mapping-sql map.csv --source-table RAW --target-table DIM
+  python -m etl_agent.cli build-target map.csv --source raw.csv --source-table RAW --target-table DIM
+  python -m etl_agent.cli etl-check map.csv --source raw.csv --target-url sqlite:///t.db ...
 """
 import argparse
 import sys
 
 from .agent import load_code_map
+from .automation import (build_target, generate_sql_package, load_dataset,
+                         run_checks, stop_if_sensitive)
 from .comparator import compare_dataframes
 from .db_compare import (check_connection, compare_file_to_table,
                          compare_tables)
+from .etl_checks import checks_passed
 from .generators import generate_all
+from .mapping import load_mapping
 from .orchestrator import AgentConfig, ETLAgent, resolve_db_url
 from .readers import read_file
 from .report import write_report
@@ -97,7 +104,52 @@ def build_parser() -> argparse.ArgumentParser:
                     help="ask Claude to explain any failures")
     ag.add_argument("--demo-disable", nargs="*", default=[],
                     help="demo ETL: switch off checks to simulate bugs")
+
+    # ---- Phase 4: ETL automation -------------------------------------
+    ms = sub.add_parser("mapping-sql",
+                        help="generate SQL (select, create table, checks) from a mapping")
+    _add_mapping_args(ms)
+    ms.add_argument("--dialect", default="ansi",
+                    help="ansi, sqlite, postgres, oracle or mssql")
+    ms.add_argument("--out", default="sql_out")
+
+    bt = sub.add_parser("build-target",
+                        help="build the expected target from a mapping and a source")
+    _add_mapping_args(bt)
+    _add_dataset_args(bt, "source")
+    bt.add_argument("--db-url", default=None,
+                    help="also create and fill the target table here (or env:NAME)")
+    bt.add_argument("--dialect", default="ansi")
+    bt.add_argument("--out", default="target_build")
+    bt.add_argument("--allow-sensitive", action="store_true")
+
+    ec = sub.add_parser("etl-check",
+                        help="check a loaded target against the source and the mapping")
+    _add_mapping_args(ec)
+    _add_dataset_args(ec, "source")
+    _add_dataset_args(ec, "target")
+    ec.add_argument("--run-sql", action="store_true",
+                    help="also run the generated SQL checks (needs --target-url "
+                         "to hold BOTH tables)")
+    ec.add_argument("--dialect", default="ansi")
+    ec.add_argument("--out", default="etl_check_run")
+    ec.add_argument("--allow-sensitive", action="store_true")
     return p
+
+
+def _add_mapping_args(p):
+    p.add_argument("mapping", help="mapping file: csv, xlsx or json")
+    p.add_argument("--source-table", default=None,
+                   help="source table name (overrides the mapping file)")
+    p.add_argument("--target-table", default=None,
+                   help="target table name (overrides the mapping file)")
+
+
+def _add_dataset_args(p, role):
+    p.add_argument(f"--{role}", default=None,
+                   help=f"{role} file: csv, xlsx or xml")
+    p.add_argument(f"--{role}-url", default=None,
+                   help=f"{role} database URL, or env:VARIABLE_NAME")
 
 
 def run_agent_command(a, llm=None) -> int:
@@ -139,12 +191,108 @@ def run_db_check(a) -> int:
     return 0
 
 
+def _open_mapping(a):
+    """Load and validate the mapping. Returns (mapping, None) or (None, 2)."""
+    try:
+        return load_mapping(a.mapping, a.source_table, a.target_table), None
+    except (ValueError, OSError) as exc:
+        print(f"STOPPED: {exc}")
+        return None, 2
+
+
+def _open_dataset(a, role, mapping):
+    """Returns (DataFrame, None) or (None, 2)."""
+    try:
+        url = resolve_db_url(getattr(a, f"{role}_url"))
+        table = getattr(mapping, f"{role}_table")
+        return load_dataset(getattr(a, role), url, table), None
+    except Exception as exc:
+        print(f"STOPPED: could not read the {role} data.")
+        print(f"Details: {str(exc)[:400]}")
+        return None, 2
+
+
+def run_mapping_sql(a) -> int:
+    mapping, code = _open_mapping(a)
+    if code:
+        return code
+    try:
+        package = generate_sql_package(mapping, a.dialect, a.out)
+    except ValueError as exc:
+        print(f"STOPPED: {exc}")
+        return 2
+    for path in package["files"]:
+        print(f"  wrote {path}")
+    print(f"{len(package['checks'])} checks generated for "
+          f"{mapping.source_table} -> {mapping.target_table} ({a.dialect}).")
+    return 0
+
+
+def run_build_target(a) -> int:
+    mapping, code = _open_mapping(a)
+    if code:
+        return code
+    source, code = _open_dataset(a, "source", mapping)
+    if code:
+        return code
+    if stop_if_sensitive(source, a.allow_sensitive):
+        return 3
+    try:
+        url = resolve_db_url(a.db_url)
+        expected, path, loaded = build_target(
+            mapping, source, a.out, url, a.dialect)
+    except Exception as exc:
+        print("STOPPED: could not build the target.")
+        print(f"Details: {str(exc)[:600]}")
+        return 2
+    print(f"Expected target: {len(expected)} rows -> {path}")
+    if url:
+        print(f"Table {mapping.target_table} created and loaded with {loaded} rows.")
+    return 0
+
+
+def run_etl_check(a) -> int:
+    mapping, code = _open_mapping(a)
+    if code:
+        return code
+    source, code = _open_dataset(a, "source", mapping)
+    if code:
+        return code
+    if stop_if_sensitive(source, a.allow_sensitive):
+        return 3
+    target, code = _open_dataset(a, "target", mapping)
+    if code:
+        return code
+    try:
+        sql_url = resolve_db_url(a.target_url) if a.run_sql else None
+        if a.run_sql and not sql_url:
+            print("STOPPED: --run-sql needs --target-url.")
+            return 2
+        results, report = run_checks(mapping, source, target, a.out,
+                                     sql_url=sql_url, dialect=a.dialect)
+    except Exception as exc:
+        print("STOPPED: could not run the checks.")
+        print(f"Details: {str(exc)[:600]}")
+        return 2
+    cols = ["check", "column", "status", "failing", "detail"]
+    print(results[cols].to_string(index=False))
+    bad = results[results["status"].isin(["FAIL", "ERROR"])]
+    print(f"\n{len(results) - len(bad)} of {len(results)} checks ok. Report: {report}")
+    return 0 if checks_passed(results) else 1
+
+
 def main(argv=None, llm=None) -> int:
     a = build_parser().parse_args(argv)
     if a.cmd == "agent":
         return run_agent_command(a, llm)
     if a.cmd == "db-check":
         return run_db_check(a)
+    if a.cmd == "mapping-sql":
+        return run_mapping_sql(a)
+    if a.cmd == "build-target":
+        return run_build_target(a)
+    if a.cmd == "etl-check":
+        return run_etl_check(a)
     if a.cmd == "infer-schema":
         schema = infer_schema(read_file(a.source), a.pk)
         schema.save(a.out)
