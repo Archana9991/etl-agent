@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: etl-agent
+Version: 0.1.0
+Summary: Compare files and tables, generate negative tests, and check ETL loads.
+Requires-Python: >=3.10
+Requires-Dist: pandas>=2.0
+Requires-Dist: openpyxl>=3.1
+Requires-Dist: lxml>=5.0
+Requires-Dist: sqlalchemy>=2.0
+Provides-Extra: ui
+Requires-Dist: streamlit>=1.40; extra == "ui"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: streamlit>=1.40; extra == "dev"

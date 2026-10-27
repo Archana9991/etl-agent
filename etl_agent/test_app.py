@@ -9,7 +9,7 @@ import pytest
 pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-APP = str(Path(__file__).resolve().parent.parent / "app.py")
+APP = str(Path(__file__).resolve().parent.parent / "app_legacy.py")
 GOOD = pd.DataFrame({"ID": ["1", "2", "3"],
                      "NAME": ["Asha", "Ravi", "Meera"],
                      "CITY": ["Pune", "Delhi", "Chennai"]})

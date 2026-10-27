@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+src/etl_agent.egg-info/PKG-INFO
+src/etl_agent.egg-info/SOURCES.txt
+src/etl_agent.egg-info/dependency_links.txt
+src/etl_agent.egg-info/requires.txt
+src/etl_agent.egg-info/top_level.txt
+test/test_phase1.py
+tests/test_automation.py
+tests/test_etl_checks.py
+tests/test_phase2.py
+tests/test_phase3.py
+tests/test_sqlgen.py
+tests/test_target_builder.py
+tests/test_ui.py
